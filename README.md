@@ -4,31 +4,24 @@
 [![PyPI](https://img.shields.io/pypi/v/subhunt)](https://pypi.org/project/subhunt/)
 [![Python](https://img.shields.io/pypi/pyversions/subhunt)](https://pypi.org/project/subhunt/)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-[![Lint](https://img.shields.io/badge/lint-ruff-261230)](https://github.com/astral-sh/ruff)
-[![MCP](https://img.shields.io/badge/MCP-compatible-blueviolet)](https://modelcontextprotocol.io)
 
-<img src="https://raw.githubusercontent.com/gabdevele/subhunt/main/docs/banner.svg" alt="subhunt" width="100%">
+`subhunt` turns a HackerOne program handle into a list of live, in-scope
+subdomains. It reads the program's structured scope, enumerates the in-scope
+wildcards, subtracts out-of-scope hosts, and keeps only the hosts that resolve
+and answer over HTTP.
 
-**subhunt** turns a HackerOne program handle into a list of *live, in-scope* subdomains.
-It reads the program's structured scope, enumerates every in-scope wildcard, removes
-out-of-scope hosts, and keeps only the ones that actually resolve and answer over HTTP.
+```text
+$ subhunt scan hackerone
+Enumerating 3 domain(s) via built-in CT sources...
+  hackerone-ext-content.com: 41 names
+  hackerone-user-content.com: 86 names
+132 in-scope candidates, resolving and probing...
+  200 b5s.hackerone-ext-content.com
+  404 cover-photos.hackerone-user-content.com
+  ...
 
-<img src="https://raw.githubusercontent.com/gabdevele/subhunt/main/docs/demo.svg" alt="subhunt demo" width="100%">
-
-## Why
-
-Generic subdomain enumerators do not know your program's scope. You end up probing
-hosts that are explicitly out of scope, and you still have to filter dead entries by
-hand. subhunt is scope-aware from the start:
-
-- **Scope-driven** - wildcards and out-of-scope entries are read straight from the
-  HackerOne program, so the output is exactly what you are allowed to test.
-- **Alive by default** - every candidate is resolved (DNS) and probed (HTTP); only
-  reachable hosts are reported.
-- **Hybrid enumeration** - uses `subfinder` when installed, otherwise falls back to
-  free Certificate Transparency sources, with no mandatory Go toolchain.
-- **Automation ready** - clean JSON/CSV/Markdown output, `--diff` for monitoring, and
-  an MCP server for agents.
+12 live in-scope hosts
+```
 
 ## Install
 
@@ -37,7 +30,7 @@ uv tool install subhunt
 # or
 pipx install subhunt
 # or
-pip install subhunt
+python -m pip install subhunt
 ```
 
 From source:
@@ -49,20 +42,24 @@ uv sync
 uv run subhunt --help
 ```
 
-Requires Python 3.11+. For better coverage, install
-[subfinder](https://github.com/projectdiscovery/subfinder) (optional).
+Requires Python 3.11+. [`subfinder`](https://github.com/projectdiscovery/subfinder)
+is optional and improves enumeration coverage.
 
 ## Credentials
 
-subhunt uses the [HackerOne Hacker API](https://api.hackerone.com/getting-started-hacker-api).
-Create an API token in your HackerOne settings and export:
+`subhunt` uses the [HackerOne Hacker API](https://api.hackerone.com/getting-started-hacker-api).
+Create an API token in your HackerOne settings and store it once:
 
 ```bash
-export H1_USERNAME="your-username"
-export H1_API_TOKEN="your-token"
+subhunt auth login
+subhunt auth status
+subhunt auth logout
 ```
 
-Without credentials the scope commands cannot run.
+The token is kept in your OS secret store (Secret Service on Linux, Keychain on
+macOS) and falls back to `~/.config/subhunt/credentials.json` with `0600`
+permissions when no keyring backend is available. `H1_USERNAME` and
+`H1_API_TOKEN` take precedence over stored credentials, which is useful in CI.
 
 ## Usage
 
@@ -89,53 +86,65 @@ subhunt scan shopify --diff today.json
 | `--include-non-bounty` | Include submittable assets without a bounty. |
 | `--only-wildcards` | Enumerate only wildcard scopes. |
 | `--dns-only` | Keep hosts that resolve, skip HTTP probing. |
+| `-sc, --status-code CODES` | Keep only these HTTP status codes (e.g. `200,404`). |
+| `--enrich` | Add technology, security headers, TLS info and favicon hash. |
+| `--takeover` | Flag dangling CNAMEs / subdomain takeover candidates. |
+| `-H, --header "Name: Value"` | Extra header on every request (`{username}` substituted). |
+| `--h1-header` | Add `X-HackerOne-Research: <username>` to every request. |
 | `--json` / `--csv` / `--md` | Output format (default: table). |
 | `-o, --output FILE` | Write results to a file. |
 | `--diff FILE` | Compare with a previous JSON result. |
 | `--concurrency N` | Requests in flight per source / probe (default 25). |
 | `--timeout SECONDS` | Per-request timeout (default 8). |
 | `--no-cache` | Bypass the local scope cache. |
+| `--no-progress` | Do not stream findings; print the final table instead. |
 
-### `subhunt scope`
+### Other commands
 
-Prints the parsed in-scope patterns, out-of-scope patterns, apexes to enumerate, and
-the program's category exclusions. Useful to sanity-check before a full run.
-
-### `subhunt mcp`
-
-Runs subhunt as an MCP server over stdio, exposing two tools:
-`find_live_subdomains(handle, ...)` and `get_scope(handle, ...)`.
+- `subhunt scope <handle>` prints the parsed in-scope and out-of-scope patterns,
+  the apexes to enumerate, and the program's category exclusions.
+- `subhunt auth login|status|logout` stores and inspects credentials. `login`
+  verifies the token against the API before saving it.
+- `subhunt mcp` runs an MCP server over stdio with the tools
+  `find_live_subdomains` and `get_scope`.
 
 ## How it works
 
-```
+```text
 handle -> HackerOne scope -> apexes -> enumerate -> filter -> alive -> output
 ```
 
-1. **Scope** - fetch structured scopes and exclusions from the HackerOne API (cached
-   locally). Assets are split into in-scope and out-of-scope patterns.
-2. **Apexes** - derive the registrable domains to enumerate from each in-scope pattern,
-   handling wildcards like `*.example.com`, `*ubereats.com`, and
-   `status.*.coinbase.com`.
-3. **Enumerate** - `subfinder` if available, otherwise built-in Certificate
+1. **Scope**: fetch structured scopes and exclusions from the HackerOne API
+   (cached locally).
+2. **Apexes**: derive the registrable domains to enumerate, handling wildcards
+   like `*.example.com`, `*ubereats.com` and `status.*.coinbase.com`.
+3. **Enumerate**: `subfinder` if available, otherwise built-in Certificate
    Transparency sources (`crt.sh`, `crt.name`, `agniops`, `jsmon`).
-4. **Filter** - keep hosts matching an in-scope pattern and not matching any
-   out-of-scope pattern.
-5. **Alive** - resolve DNS, then probe HTTP/HTTPS; keep only reachable hosts.
-6. **Output** - table, JSON, CSV, Markdown, or bug-bounty-friendly report.
+4. **Filter**: keep hosts that match an in-scope pattern and no out-of-scope
+   pattern.
+5. **Alive**: resolve DNS, then probe HTTP/HTTPS and keep reachable hosts.
+6. **Output**: table, JSON, CSV or Markdown.
 
-## Scope semantics
+Scope rules:
 
-- **In scope** - assets where `eligible_for_submission` is true and, unless
+- **In scope**: `eligible_for_submission` is true and, unless
   `--include-non-bounty` is set, `eligible_for_bounty` is true.
-- **Out of scope** - assets where `eligible_for_submission` is false. These are
-  subtracted from the results even when they fall under an in-scope wildcard.
-- Wildcards (`*`) are matched at any depth; a bare host like `example.com` covers
-  itself and its subdomains.
-- Non-host assets (CIDR, IP, mobile apps, source code, hardware, ...) and label-only
-  `OTHER` entries are ignored.
-- `scope_exclusions` are report *categories*, not hosts, so they are shown by
-  `subhunt scope` as notes rather than used for filtering.
+- **Out of scope**: `eligible_for_submission` is false. These are subtracted
+  even when they fall under an in-scope wildcard.
+- A `*` matches at any depth; a bare host covers itself and its subdomains.
+- Non-host assets (CIDR, IP, mobile apps, source code, hardware) are ignored.
+
+## Documentation
+
+| Guide | Contents |
+| --- | --- |
+| [Installation](docs/installation.md) | Requirements, install, optional `subfinder`, upgrade. |
+| [Configuration](docs/configuration.md) | Credentials, environment variables, paths, cache. |
+| [Usage](docs/usage.md) | Every command and flag, output formats, monitoring, recipes. |
+| [How it works](docs/how-it-works.md) | Scope semantics, enumeration, liveness, output schema. |
+| [MCP server](docs/mcp.md) | Add subhunt to opencode, Claude Desktop, Cursor, VS Code. |
+| [Troubleshooting](docs/troubleshooting.md) | Credentials, keyring, rate limits, empty results. |
+| [FAQ](docs/faq.md) | Scope, safety, and how it compares to other tools. |
 
 ## Development
 
@@ -146,8 +155,6 @@ uv run ruff check src tests
 uv run mypy src
 uv run pytest
 ```
-
-## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Security reports: [SECURITY.md](SECURITY.md).
 

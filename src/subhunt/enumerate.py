@@ -1,17 +1,20 @@
 import asyncio
 import shutil
 import subprocess
+from collections.abc import Awaitable, Callable
 
 import httpx
 
 USER_AGENT = "subhunt (+https://github.com/gabdevele/subhunt)"
 TIMEOUT = 30.0
 
+Source = Callable[[str, httpx.AsyncClient, asyncio.Semaphore], Awaitable[set[str]]]
 
-def make_client() -> httpx.AsyncClient:
+
+def make_client(headers: dict[str, str] | None = None) -> httpx.AsyncClient:
     return httpx.AsyncClient(
         timeout=TIMEOUT,
-        headers={"User-Agent": USER_AGENT},
+        headers={"User-Agent": USER_AGENT, **(headers or {})},
         follow_redirects=True,
     )
 
@@ -51,10 +54,12 @@ async def _run_sources(domain: str, *, client: httpx.AsyncClient, concurrency: i
     return names
 
 
-async def _guard(source, domain, client, semaphore) -> set[str]:
+async def _guard(
+    source: Source, domain: str, client: httpx.AsyncClient, semaphore: asyncio.Semaphore
+) -> set[str]:
     try:
         return await source(domain, client, semaphore)
-    except Exception:
+    except (httpx.HTTPError, ValueError):
         return set()
 
 

@@ -4,6 +4,7 @@ from mcp.server.mcpserver import MCPServer
 
 from . import __version__
 from .alive import check_hosts
+from .enrich import EnrichOptions, make_enricher
 from .enumerate import enumerate_domain, make_client
 from .h1 import H1Client, load_scope
 
@@ -20,8 +21,9 @@ async def _live_hosts(
     include_non_bounty: bool = False,
     only_wildcards: bool = False,
     dns_only: bool = False,
+    enrich: bool = False,
 ):
-    with H1Client.from_env() as client:
+    with H1Client.from_credentials() as client:
         scope = load_scope(client, handle, include_non_bounty=include_non_bounty)
 
     hosts: set[str] = set()
@@ -29,7 +31,8 @@ async def _live_hosts(
         for apex in scope.apexes(only_wildcards):
             hosts |= set(await enumerate_domain(apex, client=http))
     candidates = scope.keep(sorted(hosts), only_wildcards)
-    return await check_hosts(candidates, dns_only=dns_only)
+    enricher = make_enricher(EnrichOptions(enrich=True, takeover=True)) if enrich else None
+    return await check_hosts(candidates, dns_only=dns_only, enricher=enricher)
 
 
 @mcp.tool()
@@ -38,13 +41,19 @@ async def find_live_subdomains(
     include_non_bounty: bool = False,
     only_wildcards: bool = False,
     dns_only: bool = False,
+    enrich: bool = False,
 ) -> str:
-    """Enumerate live, in-scope subdomains for a HackerOne program handle."""
+    """Enumerate live, in-scope subdomains for a HackerOne program handle.
+
+    Set enrich to also collect technology, security headers, TLS info and
+    subdomain-takeover candidates.
+    """
     hosts = await _live_hosts(
         handle,
         include_non_bounty=include_non_bounty,
         only_wildcards=only_wildcards,
         dns_only=dns_only,
+        enrich=enrich,
     )
     return json.dumps([item.to_dict() for item in hosts], ensure_ascii=False)
 
@@ -52,7 +61,7 @@ async def find_live_subdomains(
 @mcp.tool()
 def get_scope(handle: str, include_non_bounty: bool = False, only_wildcards: bool = False) -> str:
     """Return the parsed in-scope, out-of-scope and apex patterns for a program."""
-    with H1Client.from_env() as client:
+    with H1Client.from_credentials() as client:
         scope = load_scope(client, handle, include_non_bounty=include_non_bounty)
     return json.dumps(
         {

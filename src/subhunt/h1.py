@@ -1,4 +1,3 @@
-import os
 import time
 from collections.abc import Callable
 from dataclasses import asdict
@@ -6,7 +5,7 @@ from typing import TypeVar
 
 import httpx
 
-from . import cache
+from . import cache, credentials
 from .models import ScopeAsset, ScopeExclusion
 from .scope import Scope
 
@@ -24,6 +23,14 @@ class CredentialsMissing(H1Error):
     pass
 
 
+def _retry_delay(response: httpx.Response) -> float:
+    try:
+        seconds = float(response.headers.get("Retry-After", 1))
+    except ValueError:
+        seconds = 1.0
+    return min(max(seconds, 0.0), MAX_RETRY_DELAY)
+
+
 class H1Client:
     def __init__(self, username: str, token: str, timeout: float = 30.0) -> None:
         self._client = httpx.Client(
@@ -34,12 +41,14 @@ class H1Client:
         )
 
     @classmethod
-    def from_env(cls) -> "H1Client":
-        username = os.environ.get("H1_USERNAME")
-        token = os.environ.get("H1_API_TOKEN")
-        if not username or not token:
-            raise CredentialsMissing("set H1_USERNAME and H1_API_TOKEN")
-        return cls(username, token)
+    def from_credentials(cls) -> "H1Client":
+        found = credentials.resolve()
+        if found is None:
+            raise CredentialsMissing(
+                "no HackerOne credentials found; run 'subhunt auth login' "
+                "or set H1_USERNAME and H1_API_TOKEN"
+            )
+        return cls(found.username, found.token)
 
     def close(self) -> None:
         self._client.close()
@@ -54,7 +63,7 @@ class H1Client:
         for attempt in range(MAX_RETRIES + 1):
             response = self._client.get(path, params=params)
             if response.status_code == 429 and attempt < MAX_RETRIES:
-                time.sleep(min(float(response.headers.get("Retry-After", 1)), MAX_RETRY_DELAY))
+                time.sleep(_retry_delay(response))
                 continue
             if response.status_code >= 400:
                 raise H1Error(f"GET {path} -> {response.status_code}")
@@ -77,6 +86,9 @@ class H1Client:
     def scope_exclusions(self, handle: str) -> list[ScopeExclusion]:
         payload = self._get(f"/v1/hackers/programs/{handle}/scope_exclusions")
         return [ScopeExclusion.from_api(item) for item in payload.get("data") or []]
+
+    def verify(self) -> None:
+        self._get("/v1/hackers/programs", {"page[number]": 1, "page[size]": 1})
 
 
 T = TypeVar("T")

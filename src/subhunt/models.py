@@ -11,7 +11,7 @@ class ScopeAsset:
 
     @classmethod
     def from_api(cls, item: dict) -> "ScopeAsset":
-        attrs = item.get("attributes") or item
+        attrs = item.get("attributes") or {}
         return cls(
             identifier=attrs.get("asset_identifier") or "",
             asset_type=attrs.get("asset_type") or "",
@@ -28,25 +28,54 @@ class ScopeExclusion:
 
     @classmethod
     def from_api(cls, item: dict) -> "ScopeExclusion":
-        attrs = item.get("attributes") or item
+        attrs = item.get("attributes") or {}
         return cls(category=attrs.get("category") or "", details=attrs.get("details") or "")
+
+
+@dataclass
+class Enrichment:
+    tech: list[str] = field(default_factory=list)
+    missing_headers: list[str] = field(default_factory=list)
+    tls_issuer: str | None = None
+    tls_expires: str | None = None
+    tls_sans: list[str] = field(default_factory=list)
+    favicon: str | None = None
+    takeover: str | None = None
+
+    def to_dict(self) -> dict:
+        data: dict = {
+            key: getattr(self, key)
+            for key in (
+                "tech",
+                "missing_headers",
+                "tls_issuer",
+                "tls_expires",
+                "tls_sans",
+                "favicon",
+                "takeover",
+            )
+            if getattr(self, key)
+        }
+        return data
 
 
 @dataclass
 class LiveHost:
     host: str
     ips: list[str] = field(default_factory=list)
-    url: str | None = None
     status: int | None = None
     title: str | None = None
     server: str | None = None
+    enrichment: Enrichment | None = None
 
     def to_dict(self) -> dict:
-        return {
+        data: dict = {
             "host": self.host,
             "ips": self.ips,
-            "url": self.url,
             "status": self.status,
             "title": self.title,
             "server": self.server,
         }
+        if self.enrichment:
+            data["enrichment"] = self.enrichment.to_dict()
+        return data

@@ -1,3 +1,5 @@
+import httpx
+
 from subhunt import h1
 from subhunt.models import ScopeAsset, ScopeExclusion
 
@@ -43,3 +45,12 @@ def test_cached_computes_and_stores(monkeypatch):
     )
     assert h1._cached("key", lambda: {"fresh": True}, True, 60) == {"fresh": True}
     assert stored == {"key": "key", "value": {"fresh": True}}
+
+
+def test_retry_delay_parses_seconds_and_caps():
+    assert h1._retry_delay(httpx.Response(429, headers={"Retry-After": "5"})) == 5.0
+    assert (
+        h1._retry_delay(httpx.Response(429, headers={"Retry-After": "999"})) == h1.MAX_RETRY_DELAY
+    )
+    assert h1._retry_delay(httpx.Response(429)) == 1.0
+    assert h1._retry_delay(httpx.Response(429, headers={"Retry-After": "soon"})) == 1.0

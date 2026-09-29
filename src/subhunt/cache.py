@@ -1,4 +1,5 @@
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -29,10 +30,7 @@ def read(key: str, ttl: int = DEFAULT_TTL) -> Any:
 def write(key: str, value: object) -> None:
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     payload = {"time": time.time(), "value": value}
-    _path(key).write_text(json.dumps(payload), encoding="utf-8")
-
-
-def clear() -> None:
-    if CACHE_DIR.exists():
-        for path in CACHE_DIR.glob("*.json"):
-            path.unlink()
+    target = _path(key)
+    tmp = target.with_suffix(".tmp")
+    tmp.write_text(json.dumps(payload), encoding="utf-8")
+    os.replace(tmp, target)

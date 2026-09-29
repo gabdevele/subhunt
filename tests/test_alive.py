@@ -1,5 +1,3 @@
-import httpx
-
 from subhunt import alive
 from subhunt.models import LiveHost
 
@@ -19,32 +17,26 @@ async def test_check_hosts_dns_only_drops_unresolved(monkeypatch):
     assert live[0].ips == ["1.2.3.4"]
 
 
-async def test_check_hosts_probes_resolved(monkeypatch):
+async def test_iter_live_streams_probes(monkeypatch):
     async def fake_resolve(hosts, **kwargs):
         return {host: ["1.2.3.4"] for host in hosts}
 
-    async def fake_probe(hosts, **kwargs):
-        return {"a.example.com": ("https://a.example.com", _response())}
+    async def fake_stream(alive_hosts, resolved, **kwargs):
+        for host in alive_hosts:
+            yield LiveHost(
+                host=host,
+                ips=resolved[host],
+                status=200,
+                title="Home",
+                server="nginx",
+            )
 
     monkeypatch.setattr(alive, "resolve_all", fake_resolve)
-    monkeypatch.setattr(alive, "probe_all", fake_probe)
-    live = await alive.check_hosts(["a.example.com"])
-    assert live == [
-        LiveHost(
-            host="a.example.com",
-            ips=["1.2.3.4"],
-            url="https://a.example.com",
-            status=200,
-            title="Home",
-            server="nginx",
-        )
-    ]
+    monkeypatch.setattr(alive, "_probe_stream", fake_stream)
 
+    seen = []
+    async for host in alive.iter_live(["a.example.com", "b.example.com"]):
+        seen.append(host.host)
 
-def _response() -> httpx.Response:
-    return httpx.Response(
-        200,
-        text="<title>Home</title>",
-        headers={"server": "nginx"},
-        request=httpx.Request("GET", "https://a.example.com"),
-    )
+    assert seen == ["a.example.com", "b.example.com"]
+    assert (await alive.check_hosts(["b.example.com", "a.example.com"]))[0].host == "a.example.com"

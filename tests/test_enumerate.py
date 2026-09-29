@@ -6,6 +6,15 @@ import respx
 from subhunt import enumerate
 
 
+async def test_make_client_merges_headers():
+    client = enumerate.make_client({"X-Bug-Bounty": "HackerOne-alice"})
+    try:
+        assert client.headers["x-bug-bounty"] == "HackerOne-alice"
+        assert "user-agent" in client.headers
+    finally:
+        await client.aclose()
+
+
 def test_clean_keeps_only_domain_hosts():
     names = ["*.a.example.com", "b.example.com", "evil.com", "x.example.com.evil.com", "bad host"]
     assert enumerate._clean(names, "example.com") == {"a.example.com", "b.example.com"}
