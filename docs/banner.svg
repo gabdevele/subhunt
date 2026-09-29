@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="280" viewBox="0 0 1200 280" role="img" aria-label="subhunt">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1200" y2="280" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0b1120"/>
+      <stop offset="1" stop-color="#111827"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="280" fill="url(#bg)"/>
+  <g font-family="'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace">
+    <text x="80" y="150" font-size="86" font-weight="700" fill="#f8fafc">sub<tspan fill="#34d399">hunt</tspan></text>
+    <text x="84" y="196" font-size="24" fill="#94a3b8">live, in-scope subdomains for bug bounty programs</text>
+    <text x="84" y="234" font-size="18" fill="#64748b">HackerOne scope &#8594; enumeration &#8594; out-of-scope filtering &#8594; alive hosts</text>
+  </g>
+  <g fill="#34d399">
+    <circle cx="1110" cy="70" r="4"/>
+    <circle cx="1130" cy="70" r="4" fill="#38bdf8"/>
+    <circle cx="1150" cy="70" r="4" fill="#a78bfa"/>
+  </g>
+</svg>
